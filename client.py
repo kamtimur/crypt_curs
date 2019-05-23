@@ -257,20 +257,35 @@ def VerifyChallenge(message_array, reader, writer):
         sock = writer.transport.get_extra_info('socket')
         tmp = next((x for x in session_list if x.sock == sock), None)
         tmp.session_key = key
-        print(tmp.sock,tmp.pubkey, tmp.session_key)
-
+        # print(tmp.sock,tmp.pubkey, tmp.session_key)
+        print(key)
 
         #получение открытого ключа
         public_key_array = pub_key_scheme.decode('PubKey', tmp.pubkey)
-        # Q[0] = public_key_array[]
-        EncryptGostOpen(keystr, curve, Q)
+        Q = (public_key_array['keyset']['key']['keydata']['qx'],public_key_array['keyset']['key']['keydata']['qy'])
+        #шифрование сессионного ключа
+        P, c = EncryptGostOpen(keystr, curve, Q)
 
-        message = GenerateCmd('allow_con',bytearray(''.encode()))
+        session_key_data = session_key_scheme.encode('SessionKey',
+                                                 {
+                                                     'px': P[0],
+                                                     'py': P[1],
+                                                     'c': c
+                                                 })
+        #отправка ключа
+        message = GenerateCmd('allow_con',session_key_data)
     else:
         message = GenerateCmd('invalid', bytearray(''.encode()))
     writer.write(message)
 
 def EstablishSessionKey(message_array, reader, writer):
+    session_key_asn1 = message_array['data']
+    session_key_array = session_key_scheme.decode('SessionKey',session_key_asn1)
+    P = (session_key_array['px'], session_key_array['py'])
+    c = session_key_array['c']
+    dec = DecryptGostOpen(curve, P, c)
+    deckey = decode_string(dec, 64)
+    print(deckey)
     print('session established')
 
 
