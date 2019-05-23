@@ -14,7 +14,6 @@ cmd_scheme = asn1tools.compile_files('schemes/cmd_scheme.asn')
 challenge_scheme = asn1tools.compile_files('schemes/challenge_scheme.asn')
 gost_sign_file = asn1tools.compile_files('schemes/gost_sign.asn')
 
-
 #gen keys
 enhex = lambda x: ''.join(hex(ord(i))[2:] for i in x)  # записываем шестнадцатиричное представление ключа
 
@@ -42,16 +41,16 @@ keystr = key.decode("utf-8")
 print(keystr)
 
 
+
+
 def RandomString(stringLength=10):
     """Generate a random string of fixed length """
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for i in range(stringLength))
 
 
-
 def GenSign(message):
-    hash_message = GostHash(message).digest()
-    print(hash_message.hex())
+    hash_message = GostHash(message.encode()).digest()
     e = int.from_bytes(hash_message, "big", signed=False) % curve.q
 
     r = 0
@@ -102,19 +101,15 @@ def GenSign(message):
     print("sign generated")
     return sign
 
-def AuthSign(file, sign):
-    sign_file = open(sign, 'rb')
-    sign_data = sign_file.read()
+def AuthSign(message, sign_data):
     sign_str = gost_sign_file.decode('GostSignFile', sign_data)
     r = sign_str['keyset']['key']['ciphertext']['r']
     s = sign_str['keyset']['key']['ciphertext']['s']
 
     if r > curve.q or s > curve.q:
         return False
-
-    source_file = open(file, "rb")
-    readFile = source_file.read()
-    hash = GostHash(readFile).digest()
+    print('ver message', message)
+    hash = GostHash(message.encode()).digest()
     e = int.from_bytes(hash, "big", signed=False) % curve.q
     if e == 0:
         e = 1
@@ -147,9 +142,16 @@ def HelloResponse(reader, writer):
     #валидировать открытый ключ
     ChallengeRequest(reader, writer)
 
+def HelloRequest(reader, writer):
+    pass
+    #отправить открытый ключ
+    #послать свое hello
+
 
 def ChallengeResponse(message_array, reader, writer):
-    challenge = message_array['data']
+    challenge_asn1 = message_array['data']
+    challenge_array = challenge_scheme.decode('Challenge',challenge_asn1)
+    challenge = challenge_array['challenge']
     print('challenge arrived',challenge)
     # подписать challenge и отправить его
     sign = GenSign(challenge)
@@ -159,7 +161,6 @@ def ChallengeResponse(message_array, reader, writer):
 
 
 def ChallengeRequest(reader, writer):
-    challenge = RandomString(10)
     challenge_data = challenge_scheme.encode('Challenge',
                                 {
                                     'challenge': challenge
@@ -169,15 +170,16 @@ def ChallengeRequest(reader, writer):
     message = writer.write(message)
     print('massage sent', message)
 
-def HelloRequest(reader, writer):
-    pass
-    #отправить открытый ключ
-    #послать свое hello
-
 
 def VerifyChallenge(message_array, reader, writer):
     #проверить challenge и отправить разрешение и свой открытый ключ
-    message = GenerateCmd('allow_con',bytearray(''.encode()))
+    print('verify challenge')
+    sign_data = message_array['data']
+    verified = AuthSign(challenge, sign_data)
+    if verified == True:
+        message = GenerateCmd('allow_con',bytearray(''.encode()))
+    else:
+        message = GenerateCmd('invalid', bytearray(''.encode()))
     writer.write(message)
 
 def EstablishSessionKey(message_array, reader, writer):
@@ -238,7 +240,7 @@ async def client(port, loop):
         print('message rec', response)
         ProcessInMes(response,reader, writer)
 
-
+challenge = RandomString(10)
 loop = asyncio.get_event_loop()
 # port = input("input port to listen\n")
 port = 11111;
