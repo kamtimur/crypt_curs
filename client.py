@@ -323,7 +323,7 @@ async def listener(reader, writer):
         ProcessInMes(response,reader, writer)
 
 
-async def client(port, loop):
+async def connect(port, loop):
     reader, writer = await asyncio.open_connection('localhost', port, loop=loop)
 
     # print(writer.transport.get_extra_info('socket'))
@@ -342,8 +342,9 @@ session_list=[]
 challenge = RandomString(10)
 loop = asyncio.get_event_loop()
 # port = input("input port to listen\n")
-port = 22222
+port = 11111
 loop.create_task(asyncio.start_server(listener, 'localhost', port))
 # port = input("input port to connect\n")
-loop.run_until_complete(client(11111, loop))
+loop.create_task(connect(22222, loop))
+loop.create_task(connect(33333, loop))
 loop.run_forever()
