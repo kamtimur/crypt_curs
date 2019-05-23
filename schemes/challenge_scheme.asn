@@ -1,0 +1,11 @@
+Foo DEFINITIONS ::= BEGIN
+
+	Challenge ::= SEQUENCE 
+	{
+		challenge UTF8String
+	}
+
+END
+
+
+

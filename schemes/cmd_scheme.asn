@@ -1,0 +1,12 @@
+Foo DEFINITIONS ::= BEGIN
+
+	CmdFile ::= SEQUENCE 
+	{
+		command	UTF8String,
+		data OCTET STRING
+	}
+
+END
+
+
+
