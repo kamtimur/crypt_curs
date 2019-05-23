@@ -1,0 +1,13 @@
+Foo DEFINITIONS ::= BEGIN
+
+	SessionKey ::= SEQUENCE 
+	{
+		px INTEGER,
+		py INTEGER,
+		c  INTEGER
+	}
+
+END
+
+
+

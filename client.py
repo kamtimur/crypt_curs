@@ -4,6 +4,8 @@ import random
 import string
 from eleptic import *
 from pygost.gost3410 import CURVE_PARAMS #p, q, a, b, x, y
+from pygost.gost3412 import *
+from pygost.utils import *
 from random import randrange
 from pygost.utils import *
 import random
@@ -13,15 +15,18 @@ message = 'Hello World!'
 cmd_scheme = asn1tools.compile_files('schemes/cmd_scheme.asn')
 challenge_scheme = asn1tools.compile_files('schemes/challenge_scheme.asn')
 gost_sign_file = asn1tools.compile_files('schemes/gost_sign.asn')
+pub_key_scheme = asn1tools.compile_files('schemes/public_key_scheme.asn')
+session_key_scheme = asn1tools.compile_files('schemes/session_scheme.asn')
+
+#Сессия хранит ключи для каждого сокета
+#Открытый ключ ввиде структуры асн1
+class Session:
+    def __init__(self, sock, pubkey, session_key):
+        self.sock = sock
+        self.pubkey = pubkey
+        self.session_key = session_key
 
 #gen keys
-enhex = lambda x: ''.join(hex(ord(i))[2:] for i in x)  # записываем шестнадцатиричное представление ключа
-
-abc = 'abcdefghijklmnopqrstuvwxyz'
-randomKey = lambda: enhex(
-    ''.join(random.choice(abc) for i in range(32)))  # генерируем случайную последвательность символов
-
-key = hexdec(randomKey())
 curve_param = CURVE_PARAMS["GostR3410_2012_TC26_ParamSetA"]
 
 curve = EllipticCurve(
@@ -37,8 +42,6 @@ curve = EllipticCurve(
 
 d = randrange(1, curve.q)
 Q = curve.mult(d, curve.P)
-keystr = key.decode("utf-8")
-print(keystr)
 
 
 
@@ -48,6 +51,28 @@ def RandomString(stringLength=10):
     letters = string.ascii_lowercase
     return ''.join(random.choice(letters) for i in range(stringLength))
 
+def decode_string(res, length):
+    vect = []
+    for i in range(0, length):
+        vect.append(chr(res % 256))
+        res = res // 256
+    return "".join(reversed(vect))
+
+def EncryptGostOpen(chunk, curv, O):
+	num = 0
+	for i in chunk:
+		num *= 256
+		num += ord(i)
+	k = randrange(1, curv.p-1)
+	pk = curv.mult(k, curv.P)
+	qk = curv.mult(k, O)
+	l = (num*qk[0])%curv.p
+	return pk,l
+
+def DecryptGostOpen(curv, O, l):
+    D = curve.mult(d, O)
+    t = l*(invert(D[0],curv.p))%curv.p
+    return t
 
 def GenSign(message):
     hash_message = GostHash(message.encode()).digest()
@@ -108,7 +133,6 @@ def AuthSign(message, sign_data):
 
     if r > curve.q or s > curve.q:
         return False
-    print('ver message', message)
     hash = GostHash(message.encode()).digest()
     e = int.from_bytes(hash, "big", signed=False) % curve.q
     if e == 0:
@@ -138,15 +162,59 @@ def GenerateCmd(cmd_string, data):
 
 
 
-def HelloResponse(reader, writer):
-    #валидировать открытый ключ
+def HelloResponse(message_array, reader, writer):
+
+    #получение открытого ключа
+    pubkey_asn1 = message_array['data']
+    # валидировать открытый ключ
+    validate = True
+    #создание сессии
+    sock = writer.transport.get_extra_info('socket')
+    session = Session(sock,pubkey_asn1,None)
+    session_list.append(session)
+    tmp = next((x for x in session_list if x.sock == sock), None)
+    print(tmp.pubkey)
+    #отправка челленджа
     ChallengeRequest(reader, writer)
 
+
 def HelloRequest(reader, writer):
-    pass
+
     #отправить открытый ключ
     #послать свое hello
-
+    pub_key_data = pub_key_scheme.encode('PubKey', dict(keyset=
+    {
+        'key': dict
+            (
+            algid=b'\x80\x06\x07\x00',
+            test='PubKey',
+            keydata=dict
+            (
+                qx = Q[0],
+                qy = Q[1]
+            ),
+            param=dict
+                (
+                fieldparam=dict
+                (
+                    prime=curve.p
+                ),
+                curveparam=dict
+                    (
+                    a=curve.a,
+                    b=curve.b
+                ),
+                genparam=dict
+                    (
+                    px=curve.P[0],
+                    py=curve.P[1]
+                ),
+                q=curve.q
+            ),
+        )
+    }, last={}))
+    cmd_message = GenerateCmd('hello',pub_key_data)
+    writer.write(cmd_message)
 
 def ChallengeResponse(message_array, reader, writer):
     challenge_asn1 = message_array['data']
@@ -166,42 +234,53 @@ def ChallengeRequest(reader, writer):
                                     'challenge': challenge
                                 })
     message = GenerateCmd('challenge',challenge_data)
-
-    message = writer.write(message)
-    print('massage sent', message)
+    writer.write(message)
 
 
 def VerifyChallenge(message_array, reader, writer):
-    #проверить challenge и отправить разрешение и свой открытый ключ
-    print('verify challenge')
+    #проверить challenge и отправить разрешение и сессионный ключ
     sign_data = message_array['data']
     verified = AuthSign(challenge, sign_data)
     if verified == True:
+        # сгенерировать сессионный ключ,получить окрытый ключ из сессии, зашифровать его открытым ключом, взять хэш подписать и отправить
+        # генерация сессионного ключа
+        enhex = lambda x: ''.join(hex(ord(i))[2:] for i in x)  # записываем шестнадцатиричное представление ключа
+
+        abc = 'abcdefghijklmnopqrstuvwxyz'
+        randomKey = lambda: enhex(
+            ''.join(random.choice(abc) for i in range(32)))  # генерируем случайную последвательность символов
+
+        key = hexdec(randomKey())
+        keystr = key.decode("utf-8")
+        kuznechik = GOST3412Kuznechik(key)
+        # запись его в сессию
+        sock = writer.transport.get_extra_info('socket')
+        tmp = next((x for x in session_list if x.sock == sock), None)
+        tmp.session_key = key
+        print(tmp.sock,tmp.pubkey, tmp.session_key)
+
+
+        #получение открытого ключа
+        public_key_array = pub_key_scheme.decode('PubKey', tmp.pubkey)
+        # Q[0] = public_key_array[]
+        EncryptGostOpen(keystr, curve, Q)
+
         message = GenerateCmd('allow_con',bytearray(''.encode()))
     else:
         message = GenerateCmd('invalid', bytearray(''.encode()))
     writer.write(message)
 
 def EstablishSessionKey(message_array, reader, writer):
-    #сгенерировать сессионный ключ зашифровать его открытым ключом, взять хэш подписать и отправить
-    message = GenerateCmd('est_ses_key',bytearray(''.encode()))
-    writer.write(message)
-
-def SetSessionKey(message_array, reader, writer):
-    #получить сессионный ключ, расшифровать его, проверить подпись, установить его
-    message = GenerateCmd('enc_success',bytearray(''.encode()))
-    writer.write(message)
-
-def StartSession(message_array, reader, writer):
     print('session established')
 
 
 def ProcessInMes(message,reader, writer):
+    print(writer.transport.get_extra_info('sock'))
+    # print(reader.transport.get_extra_info('sockname'))
     message_array = cmd_scheme.decode('CmdFile', message)
     cmd = message_array['command']
-    print('cmd rec ', cmd)
     if cmd == 'hello':
-        HelloResponse(reader, writer)
+        HelloResponse(message_array,reader, writer)
         return True
     if cmd == 'challenge':
         ChallengeResponse(message_array, reader, writer)
@@ -212,12 +291,6 @@ def ProcessInMes(message,reader, writer):
     if cmd == 'allow_con':
         EstablishSessionKey(message_array, reader, writer)
         return True
-    if cmd == 'est_ses_key':
-        SetSessionKey(message_array, reader, writer)
-        return True
-    if cmd == 'enc_success':
-        StartSession(message_array, reader, writer)
-        return True
     print('command invalid', cmd)
     return False
 
@@ -225,26 +298,33 @@ def ProcessInMes(message,reader, writer):
 async def listener(reader, writer):
     while True:
         response = (await reader.read(8192))
-        print('message rec', response)
+        # print('message rec', response)
         ProcessInMes(response,reader, writer)
 
 
 async def client(port, loop):
     reader, writer = await asyncio.open_connection('localhost', port, loop=loop)
 
-    cmd_message = GenerateCmd('hello',bytearray(''.encode()))
-    print('Send: %r' % cmd_message)
-    writer.write(cmd_message)
+    print(writer.transport.get_extra_info('socket'))
+    sock = writer.transport.get_extra_info('socket')
+    session = Session(sock,None,None)
+    session_list.append(session)
+
+
+
+    HelloRequest(reader, writer)
     while True:
         response = (await reader.read(8192))
-        print('message rec', response)
+        # print('message rec', response)
         ProcessInMes(response,reader, writer)
 
+session_list=[]
 challenge = RandomString(10)
 loop = asyncio.get_event_loop()
 # port = input("input port to listen\n")
-port = 11111;
+port = 11111
 loop.create_task(asyncio.start_server(listener, 'localhost', port))
+loop.create_task(asyncio.start_server(listener, 'localhost', 22222))
 # port = input("input port to connect\n")
-loop.run_until_complete(client(port, loop))
+loop.run_until_complete(client(22222, loop))
 loop.run_forever()
