@@ -1,0 +1,47 @@
+Foo DEFINITIONS ::= BEGIN
+
+	GostSignFile ::= SEQUENCE 
+	{
+		keyset SET
+		{
+			key SEQUENCE
+			{
+				algid	OCTET STRING,
+				test	UTF8String,
+				keydata SEQUENCE
+				{
+					qx INTEGER,
+					qy INTEGER
+				},
+				param SEQUENCE
+				{
+					fieldparam SEQUENCE
+					{
+						prime INTEGER
+					},		
+					curveparam SEQUENCE
+					{
+						a INTEGER,
+						b INTEGER
+					},
+					genparam SEQUENCE
+					{
+						px INTEGER,
+						py INTEGER
+					},
+					q INTEGER
+				},
+				ciphertext SEQUENCE
+				{
+					r INTEGER,
+					s INTEGER
+				}
+			}
+		},
+		last SEQUENCE{}
+	}
+
+END
+
+
+
