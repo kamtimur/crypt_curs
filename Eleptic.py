@@ -1,25 +1,25 @@
 class EllipticCurve:
 
-    def __init__(self, p=0, a=0, b=0, g=(), n=0):
+    def __init__(self, p=0, a=0, b=0, P=(), q=0):
 
         """
 		An elliptic curve over a prime field.
         The field is specified by the parameter 'p'.
         The curve coefficients are 'a' and 'b'.
-        The base point of the cyclic subgroup is 'g'
-        The order of the subgroup is 'n'.
+        The base point of the cyclic subgroup is 'P'
+        The order of the subgroup is 'q'.
         """
 
         self.p = p
         self.a = a
         self.b = b
-        self.g = g
-        self.n = n
+        self.P = P
+        self.q = q
 
         assert pow(2, p - 1, p) == 1
         assert (4 * a * a * a + 27 * b * b) % p != 0
-        assert self.is_on_curve(g)
-        assert self.mult(n, g) is None
+        assert self.is_on_curve(P)
+        assert self.mult(q, P) is None
 
     def is_on_curve(self, point):
 
@@ -80,26 +80,26 @@ class EllipticCurve:
 
         return result
 
-    def mult(self, n, point):
+    def mult(self, q, point):
 
         """Returns n * point computed using the double and add algorithm."""
 
-        if n % self.n == 0 or point is None:
+        if q % self.q == 0 or point is None:
             return None
 
-        if n < 0:
-            return self.neg(self.mult(-n, point))
+        if q < 0:
+            return self.neg(self.mult(-q, point))
 
         result = None
         addend = point
 
-        while n:
+        while q:
 
-            if n & 1:
+            if q & 1:
                 result = self.add(result, addend)
 
             addend = self.double(addend)
-            n >>= 1
+            q >>= 1
 
         return result
 
@@ -113,26 +113,7 @@ class EllipticCurve:
         return 'y^2 = (x^3 {} {}x {} {}) mod {}'.format(
             a_sign, a, b_sign, b, self.p)
 
-    def export(self):
-        return "Curve:\n" \
-               "\tp: {} \n" \
-               "\ta: {} \n" \
-               "\tb: {} \n" \
-               "\tg: \n" \
-               "\t\tx = {} \n" \
-               "\t\ty = {} \n" \
-               "\tn: {} \n".\
-            format(
-            self.p,
-            self.a,
-            self.b,
-            self.g[0],
-            self.g[1],
-            self.n
-        )
-
-
-def invert(n, p):
+def invert(q, p):
 
 	"""Returns the inverse of n modulo p.
 
@@ -141,17 +122,17 @@ def invert(n, p):
     n must be non-zero and p must be a prime.
     """
 
-	if n == 0:
+	if q == 0:
 
 		raise ZeroDivisionError('division by zero')
 
-	if n < 0:
+	if q < 0:
 
-		return p - invert(-n, p)
+		return p - invert(-q, p)
 
 	s, old_s = 0, 1
 	t, old_t = 1, 0
-	r, old_r = p, n
+	r, old_r = p, q
 
 	while r != 0:
 
@@ -163,6 +144,6 @@ def invert(n, p):
 	gcd, x, y = old_r, old_s, old_t
 
 	assert gcd == 1
-	assert (n * x) % p == 1
+	assert (q * x) % p == 1
 
 	return x % p
