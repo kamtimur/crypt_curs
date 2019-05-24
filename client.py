@@ -10,6 +10,7 @@ from random import randrange
 from pygost.utils import *
 import random
 from pygost.gost34112012 import GOST34112012 as GostHash
+import sys
 
 message = 'Hello World!'
 cmd_scheme = asn1tools.compile_files('schemes/cmd_scheme.asn')
@@ -21,7 +22,7 @@ session_key_scheme = asn1tools.compile_files('schemes/session_scheme.asn')
 #Сессия хранит ключи для каждого сокета
 #Открытый ключ ввиде структуры асн1
 class Session:
-    def __init__(self, sock, pubkey, session_key):
+    def __init__(self,sock, pubkey, session_key):
         self.sock = sock
         self.pubkey = pubkey
         self.session_key = session_key
@@ -160,7 +161,23 @@ def GenerateCmd(cmd_string, data):
                                 })
     return message
 
+def EncryptGostSym(text, gost):
+    if isinstance(text, str):
+        text = text.encode()
+    ans = b''
+    for i in range(0, len(text), 16):
+        st = text[i:i + 16]
+        if len(st) < 16:
+            st = st + b' ' * (16 - len(st))
+        ans += gost.encrypt(st)
+    return ans
 
+def DecryptGostSym(encText, gost):
+    ans = b''
+    for i in range(0, len(encText), 16):
+        st = encText[i:i + 16]
+        ans += gost.decrypt(st)
+    return ans.rstrip()
 
 def HelloResponse(message_array, reader, writer):
 
@@ -238,6 +255,7 @@ def ChallengeRequest(reader, writer):
 
 
 def VerifyChallenge(message_array, reader, writer):
+    print('verifyChallenge')
     #проверить challenge и отправить разрешение и сессионный ключ
     sock = writer.transport.get_extra_info('socket')
     tmp = next((x for x in session_list if x.sock == sock), None)
@@ -258,11 +276,10 @@ def VerifyChallenge(message_array, reader, writer):
 
         key = hexdec(randomKey())
         keystr = key.decode("utf-8")
-        kuznechik = GOST3412Kuznechik(key)
         # запись его в сессию
         tmp.session_key = key
         # print(tmp.sock,tmp.pubkey, tmp.session_key)
-        print(key)
+        # print(key)
 
         #шифрование сессионного ключа
         P, c = EncryptGostOpen(keystr, curve, Q)
@@ -273,6 +290,10 @@ def VerifyChallenge(message_array, reader, writer):
                                                      'py': P[1],
                                                      'c': c
                                                  })
+
+        # gost = GOST3412Kuznechik(tmp.session_key)
+        print('session_key',tmp.session_key)
+
         #отправка ключа
         message = GenerateCmd('allow_con',session_key_data)
     else:
@@ -286,15 +307,54 @@ def EstablishSessionKey(message_array, reader, writer):
     P = (session_key_array['px'], session_key_array['py'])
     c = session_key_array['c']
     dec = DecryptGostOpen(curve, P, c)
-    deckey = decode_string(dec, 64)
     sock = writer.transport.get_extra_info('socket')
-    print(sock)
     tmp = next((x for x in session_list if x.sock == sock), None)
-    print(tmp)
-    tmp.session_key = dec
-    print(deckey)
-    print('session established')
+    deckey = decode_string(dec, 32)
+    tmp.session_key = deckey.encode('utf-8')
+    message = GenerateCmd('ses_est', bytearray(''.encode()))
+    writer.write(message)
 
+def TransmitData(message_array, reader, writer):
+    sock = writer.transport.get_extra_info('socket')
+    tmp = next((x for x in session_list if x.sock == sock), None)
+    if(tmp.session_key == None):
+        message = GenerateCmd('invalid', bytearray(''.encode()))
+        writer.write(message)
+        return
+    data = RandomString(256)
+    print('key',tmp.session_key)
+    ses_key = (tmp.session_key)
+    print('key',ses_key)
+    gost = GOST3412Kuznechik(ses_key)
+    enc_data = EncryptGostSym(data,gost)
+    dec_data = DecryptGostSym(enc_data, gost)
+    print('source data      ',data)
+    print('encrypted data   ', enc_data)
+    message = GenerateCmd('data', bytearray(enc_data))
+    writer.write(message)
+
+def ShowData(message_array, reader, writer):
+    sock = writer.transport.get_extra_info('socket')
+    tmp = next((x for x in session_list if x.sock == sock), None)
+    if(tmp.session_key == None):
+        message = GenerateCmd('invalid', bytearray(''.encode()))
+        writer.write(message)
+        return
+    data = message_array['data']
+    print('source data      ',data)
+
+    ses_key = tmp.session_key
+    gost = GOST3412Kuznechik(ses_key)
+    dec_data = DecryptGostSym(data, gost)
+
+    print('decrypted data   ', dec_data)
+    # message = GenerateCmd('get_data', bytearray(''.encode()))
+    # writer.write(message)
+    # return
+
+def GetData(message_array, reader, writer):
+    message = GenerateCmd('get_data', bytearray(''.encode()))
+    writer.write(message)
 
 def ProcessInMes(message,reader, writer):
     # print(writer.transport.get_extra_info('sock'))
@@ -312,6 +372,15 @@ def ProcessInMes(message,reader, writer):
         return True
     if cmd == 'allow_con':
         EstablishSessionKey(message_array, reader, writer)
+        return True
+    if cmd == 'get_data':
+        TransmitData(message_array, reader, writer)
+        return True
+    if cmd == 'ses_est':
+        GetData(message_array, reader, writer)
+        return True
+    if cmd == 'data':
+        ShowData(message_array, reader, writer)
         return True
     print('command invalid', cmd)
     return False
@@ -341,10 +410,8 @@ async def connect(port, loop):
 session_list=[]
 challenge = RandomString(10)
 loop = asyncio.get_event_loop()
-# port = input("input port to listen\n")
 port = 11111
 loop.create_task(asyncio.start_server(listener, 'localhost', port))
-# port = input("input port to connect\n")
 loop.create_task(connect(22222, loop))
-loop.create_task(connect(33333, loop))
+# loop.create_task(connect(33333, loop))
 loop.run_forever()
