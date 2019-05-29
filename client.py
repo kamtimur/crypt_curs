@@ -27,25 +27,6 @@ class Session:
         self.pubkey = pubkey
         self.session_key = session_key
 
-#gen keys
-curve_param = CURVE_PARAMS["GostR3410_2012_TC26_ParamSetA"]
-
-curve = EllipticCurve(
-    int.from_bytes(curve_param[0], "big"),
-    int.from_bytes(curve_param[2], "big"),
-    int.from_bytes(curve_param[3], "big"),
-    (
-        int.from_bytes(curve_param[4], "big"),
-        int.from_bytes(curve_param[5], "big")
-    ),
-    int.from_bytes(curve_param[1], "big")
-)
-
-d = randrange(1, curve.q)
-Q = curve.mult(d, curve.P)
-
-
-
 
 def RandomString(stringLength=10):
     """Generate a random string of fixed length """
@@ -153,11 +134,12 @@ def AuthSign(message, sign_data, Q):
         print("sign false")
         return False
 
-def GenerateCmd(cmd_string, data):
+def GenerateCmd(cmd_string, data, sign):
     message = cmd_scheme.encode('CmdFile',
                                 {
                                     'command': cmd_string,
-                                    'data': data
+                                    'data': data,
+                                    'sign': sign
                                 })
     return message
 
@@ -230,7 +212,8 @@ def HelloRequest(reader, writer):
             ),
         )
     }, last={}))
-    cmd_message = GenerateCmd('hello',pub_key_data)
+    #подписать
+    cmd_message = GenerateCmd('hello',pub_key_data,bytearray(''.encode()))
     writer.write(cmd_message)
 
 def ChallengeResponse(message_array, reader, writer):
@@ -241,7 +224,7 @@ def ChallengeResponse(message_array, reader, writer):
     # подписать challenge и отправить его
     sign = GenSign(challenge)
 
-    message = GenerateCmd('challenge_response',sign)
+    message = GenerateCmd('challenge_response',sign,bytearray(''.encode()))
     writer.write(message)
 
 
@@ -250,7 +233,7 @@ def ChallengeRequest(reader, writer):
                                 {
                                     'challenge': challenge
                                 })
-    message = GenerateCmd('challenge',challenge_data)
+    message = GenerateCmd('challenge',challenge_data,bytearray(''.encode()))
     writer.write(message)
 
 
@@ -295,9 +278,9 @@ def VerifyChallenge(message_array, reader, writer):
         print('session_key',tmp.session_key)
 
         #отправка ключа
-        message = GenerateCmd('allow_con',session_key_data)
+        message = GenerateCmd('allow_con',session_key_data,bytearray(''.encode()))
     else:
-        message = GenerateCmd('invalid', bytearray(''.encode()))
+        message = GenerateCmd('invalid', bytearray(''.encode()),bytearray(''.encode()))
     writer.write(message)
 
 def EstablishSessionKey(message_array, reader, writer):
@@ -311,14 +294,14 @@ def EstablishSessionKey(message_array, reader, writer):
     tmp = next((x for x in session_list if x.sock == sock), None)
     deckey = decode_string(dec, 32)
     tmp.session_key = deckey.encode('utf-8')
-    message = GenerateCmd('ses_est', bytearray(''.encode()))
+    message = GenerateCmd('ses_est', bytearray(''.encode()),bytearray(''.encode()))
     writer.write(message)
 
 def TransmitData(message_array, reader, writer):
     sock = writer.transport.get_extra_info('socket')
     tmp = next((x for x in session_list if x.sock == sock), None)
     if(tmp.session_key == None):
-        message = GenerateCmd('invalid', bytearray(''.encode()))
+        message = GenerateCmd('invalid', bytearray(''.encode()),bytearray(''.encode()))
         writer.write(message)
         return
     data = RandomString(256)
@@ -330,14 +313,14 @@ def TransmitData(message_array, reader, writer):
     dec_data = DecryptGostSym(enc_data, gost)
     print('source data      ',data)
     print('encrypted data   ', enc_data)
-    message = GenerateCmd('data', bytearray(enc_data))
+    message = GenerateCmd('data', bytearray(enc_data),bytearray(''.encode()))
     writer.write(message)
 
 def ShowData(message_array, reader, writer):
     sock = writer.transport.get_extra_info('socket')
     tmp = next((x for x in session_list if x.sock == sock), None)
     if(tmp.session_key == None):
-        message = GenerateCmd('invalid', bytearray(''.encode()))
+        message = GenerateCmd('invalid', bytearray(''.encode()),bytearray(''.encode()))
         writer.write(message)
         return
     data = message_array['data']
@@ -353,7 +336,7 @@ def ShowData(message_array, reader, writer):
     # return
 
 def GetData(message_array, reader, writer):
-    message = GenerateCmd('get_data', bytearray(''.encode()))
+    message = GenerateCmd('get_data', bytearray(''.encode()),bytearray(''.encode()))
     writer.write(message)
 
 def ProcessInMes(message,reader, writer):
@@ -401,17 +384,40 @@ async def connect(port, loop):
     session_list.append(session)
 
 
-
     HelloRequest(reader, writer)
     while True:
         response = (await reader.read(8192))
         ProcessInMes(response,reader, writer)
+
+
+#gen keys
+curve_param = CURVE_PARAMS["GostR3410_2012_TC26_ParamSetA"]
+
+curve = EllipticCurve(
+    int.from_bytes(curve_param[0], "big"),
+    int.from_bytes(curve_param[2], "big"),
+    int.from_bytes(curve_param[3], "big"),
+    (
+        int.from_bytes(curve_param[4], "big"),
+        int.from_bytes(curve_param[5], "big")
+    ),
+    int.from_bytes(curve_param[1], "big")
+)
+
+#получить сертификат, ключи
+#
+#
+#
+d = randrange(1, curve.q)
+Q = curve.mult(d, curve.P)
+
 
 session_list=[]
 challenge = RandomString(10)
 loop = asyncio.get_event_loop()
 port = 11111
 loop.create_task(asyncio.start_server(listener, 'localhost', port))
-loop.create_task(connect(22222, loop))
-# loop.create_task(connect(33333, loop))
+loop.create_task(connect(11111, loop))
+#loop.create_task(connect(33333, loop))
 loop.run_forever()
+

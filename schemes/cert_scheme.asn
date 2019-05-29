@@ -1,0 +1,10 @@
+Foo DEFINITIONS ::= BEGIN
+
+	Cert ::= SEQUENCE 
+	{
+		pub OCTET STRING,
+		capub OCTET STRING,
+		sign OCTET STRING
+	}
+
+END

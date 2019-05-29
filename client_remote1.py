@@ -401,11 +401,11 @@ async def connect(port, loop):
     session_list.append(session)
 
 
-
     HelloRequest(reader, writer)
     while True:
         response = (await reader.read(8192))
         ProcessInMes(response,reader, writer)
+
 
 session_list=[]
 challenge = RandomString(10)

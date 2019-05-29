@@ -1,0 +1,41 @@
+Foo DEFINITIONS ::= BEGIN
+
+	PrivKey ::= SEQUENCE 
+	{
+		keyset SET
+		{
+			key SEQUENCE
+			{
+				algid	OCTET STRING,
+				test	UTF8String,
+				keydata SEQUENCE
+				{
+					d INTEGER
+				},
+				param SEQUENCE
+				{
+					fieldparam SEQUENCE
+					{
+						prime INTEGER
+					},		
+					curveparam SEQUENCE
+					{
+						a INTEGER,
+						b INTEGER
+					},
+					genparam SEQUENCE
+					{
+						px INTEGER,
+						py INTEGER
+					},
+					q INTEGER
+				}
+			}
+		},
+		last SEQUENCE{}
+	}
+
+END
+
+
+

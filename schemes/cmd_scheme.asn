@@ -3,7 +3,8 @@ Foo DEFINITIONS ::= BEGIN
 	CmdFile ::= SEQUENCE 
 	{
 		command	UTF8String,
-		data OCTET STRING
+		data OCTET STRING,
+		sign OCTET STRING
 	}
 
 END
