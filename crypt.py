@@ -95,7 +95,7 @@ def GenSign(curve, message, d, Q):
             )
         )
     }, last={}))
-    print("sign generated")
+    # print("sign generated")
     return sign
 
 def AuthSign(curve, message, sign_data, Q):
@@ -118,10 +118,10 @@ def AuthSign(curve, message, sign_data, Q):
     C = curve.add(curve.mult(z1, curve.P), curve.mult(z2, Q))
 
     if  C[0] % curve.q == r:
-        print("sign true")
+        # print("sign true")
         return True
     else:
-        print("sign false")
+        # print("sign false")
         return False
 
 
