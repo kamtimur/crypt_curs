@@ -34,12 +34,12 @@ class Session:
 
 def GenerateCmd(writer, cmd_string, data):
     all_data = bytearray(cmd_string.encode()+bytearray(data))
-    sign = GenSign(curve, all_data, d, Q)
+    sign = GenSign(curve, bytearray(all_data), d, Q)
 
     sock = writer.transport.get_extra_info('socket')
     session = next((x for x in session_list if x.sock == sock), None)
 
-    print(cmd_string,session,session.pubkey,session.shaken)
+    print(cmd_string,session,session.shaken)
     message = cmd_scheme.encode('CmdFile',
                                 {
                                     'command': cmd_string,
@@ -119,7 +119,6 @@ def VerifyChallenge(message_array, reader, writer):
         GenerateCmd(writer,'invalid', bytearray(''.encode()))
 
 def EstablishSessionKey(message_array, reader, writer):
-
     session_key_asn1 = message_array['data']
     session_key_array = session_key_scheme.decode('SessionKey',session_key_asn1)
     P = (session_key_array['px'], session_key_array['py'])
@@ -129,21 +128,20 @@ def EstablishSessionKey(message_array, reader, writer):
     session = next((x for x in session_list if x.sock == sock), None)
     deckey = decode_string(dec, 32)
     session.session_key = deckey.encode('utf-8')
-    GenerateCmd(writer,'ses_est', bytearray(''.encode()))
+    GenerateCmd(writer,'get_data', bytearray(''.encode()))
 
 def TransmitData(message_array, reader, writer):
     sock = writer.transport.get_extra_info('socket')
-    tmp = next((x for x in session_list if x.sock == sock), None)
-    if(tmp.session_key == None):
+    session = next((x for x in session_list if x.sock == sock), None)
+
+    if(session.session_key == None):
         GenerateCmd(writer,'invalid', bytearray(''.encode()))
         return
+
     data = RandomString(256)
-    print('key',tmp.session_key)
-    ses_key = (tmp.session_key)
-    print('key',ses_key)
+    ses_key = (session.session_key)
     gost = GOST3412Kuznechik(ses_key)
     enc_data = EncryptGostSym(data,gost)
-    dec_data = DecryptGostSym(enc_data, gost)
     print('source data      ',data)
     print('encrypted data   ', enc_data)
     GenerateCmd(writer,'data', bytearray(enc_data))
@@ -166,11 +164,8 @@ def ShowData(message_array, reader, writer):
     # writer.write(message)
     # return
 
-def GetData(message_array, reader, writer):
-    GenerateCmd(writer, 'get_data', bytearray(''.encode()))
 
 def GenerateSessionKeys(message_array, reader, writer):
-
     # сгенерировать сессионный ключ,получить окрытый ключ из сессии, зашифровать его открытым ключом, взять хэш подписать и отправить
     # генерация сессионного ключа
     enhex = lambda x: ''.join(hex(ord(i))[2:] for i in x)  # записываем шестнадцатиричное представление ключа
@@ -185,8 +180,6 @@ def GenerateSessionKeys(message_array, reader, writer):
     sock = writer.transport.get_extra_info('socket')
     session = next((x for x in session_list if x.sock == sock), None)
     session.session_key = key
-    # print(tmp.sock,tmp.pubkey, tmp.session_key)
-    # print(key)
 
     # шифрование сессионного ключа
     P, c = EncryptGostOpen(keystr, curve, Q)
@@ -197,28 +190,38 @@ def GenerateSessionKeys(message_array, reader, writer):
                                                      'py': P[1],
                                                      'c': c
                                                  })
-
-    # gost = GOST3412Kuznechik(tmp.session_key)
     print('session_key', session.session_key)
 
     # отправка ключа
     GenerateCmd(writer,'key', session_key_data)
 
+
+
+
 def ProcessInMes(message,reader, writer):
-
-
     message_array = cmd_scheme.decode('CmdFile', message)
 
     #проверить подпись, только после этого выполнять
     cmd = message_array['command']
+    sign = message_array['sign']
+    data = message_array['data']
+    all_data = bytearray(cmd.encode() + bytearray(data))
+
 
     sock = writer.transport.get_extra_info('socket')
     session = next((x for x in session_list if x.sock == sock), None)
     if session == None:
         session = Session(sock, None, None)
         session_list.append(session)
-    print(cmd, session, session.pubkey, session.shaken)
+    print(cmd, session, session.shaken)
 
+    if session.pubkey != None:
+        pub_key_array = pub_key_scheme.decode('PubKey', session.pubkey)
+        pub_key = (pub_key_array['keyset']['key']['keydata']['qx'], pub_key_array['keyset']['key']['keydata']['qy'])
+        validate = AuthSign(curve, all_data, sign, pub_key)
+        if validate == False:
+            GenerateCmd(writer, 'invalid', bytearray(''.encode()))
+            return
 
     if cmd == 'hello':
         HelloResponse(message_array,reader, writer)
@@ -237,9 +240,6 @@ def ProcessInMes(message,reader, writer):
         return True
     if cmd == 'get_data':
         TransmitData(message_array, reader, writer)
-        return True
-    if cmd == 'ses_est':
-        GetData(message_array, reader, writer)
         return True
     if cmd == 'data':
         ShowData(message_array, reader, writer)
@@ -326,7 +326,7 @@ challenge = RandomString(10)
 loop = asyncio.get_event_loop()
 port = 11111
 loop.create_task(asyncio.start_server(listener, 'localhost', port))
-loop.create_task(connect(11111, loop))
+loop.create_task(connect(22222, loop))
 #loop.create_task(connect(33333, loop))
 loop.run_forever()
 
