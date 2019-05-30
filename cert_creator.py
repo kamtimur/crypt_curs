@@ -294,9 +294,9 @@ def AuthCert():
     # pub_key_CA_array= pub_key_scheme.decode('PubKey', pub_key_CA_data)
     # pub_key_CA = (pub_key_CA_array['keyset']['key']['keydata']['qx'],pub_key_CA_array['keyset']['key']['keydata']['qy'])
 
-    GenCertAndKeysClient('client1')
+    GenCertAndKeysClient('client2')
 
-    cert_file = open('client1/cl.crt', "rb")
+    cert_file = open('client2/cl.crt', "rb")
     cert_data = cert_file.read()
     cert_array = cert_scheme.decode('Cert', cert_data)
     pub_key_data = cert_array['pub']
@@ -326,6 +326,5 @@ curve = EllipticCurve(
     int.from_bytes(curve_param[1], "big")
 )
 
-
-# GenCACert()
-AuthCert()
+GenCertAndKeysClient('client1')
+GenCertAndKeysClient('client2')
