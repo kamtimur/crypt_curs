@@ -15,6 +15,7 @@ gost_sign_file = asn1tools.compile_files('schemes/gost_sign.asn')
 
 def GenSign(message,d,Q):
     hash_message = GostHash(message).digest()
+    print(hash_message)
     e = int.from_bytes(hash_message, "big", signed=False) % curve.q
 
     r = 0
@@ -64,6 +65,33 @@ def GenSign(message,d,Q):
     }, last={}))
     print("sign generated")
     return sign
+
+def AuthSign(message, sign_data, Q):
+    sign_str = gost_sign_file.decode('GostSignFile', sign_data)
+    r = sign_str['keyset']['key']['ciphertext']['r']
+    s = sign_str['keyset']['key']['ciphertext']['s']
+
+    if r > curve.q or s > curve.q:
+        return False
+    hash = GostHash(message).digest()
+    print(hash)
+    e = int.from_bytes(hash, "big", signed=False) % curve.q
+    if e == 0:
+        e = 1
+
+
+    v = invert(e, curve.q)
+    z1 = (s*v) % curve.q
+    z2 = (-r*v) % curve.q
+
+    C = curve.add(curve.mult(z1, curve.P), curve.mult(z2, Q))
+
+    if  C[0] % curve.q == r:
+        print("sign true")
+        return True
+    else:
+        print("sign false")
+        return False
 
 def GenCACert():
     d = random.randrange(1, curve.q)
@@ -139,15 +167,15 @@ def GenCACert():
                                     'capub': pub_key_data,
                                     'sign': sign
                                 })
-    cert_file = open('CA.crt', "wb")
+    cert_file = open('CA/CA.crt', "wb")
     cert_file.write(cert_data)
     cert_file.close()
 
-    priv_file = open('CA.priv', "wb")
+    priv_file = open('CA/CA.priv', "wb")
     priv_file.write(priv_key_data)
     priv_file.close()
 
-    pub_file = open('CA.pub', "wb")
+    pub_file = open('CA/CA.pub', "wb")
     pub_file.write(pub_key_data)
     pub_file.close()
 
@@ -230,34 +258,60 @@ def GenCertAndKeysClient(client_name):
 
     #создать подпись сертификата с помощью закрытого ключа УЦ
     #получение закрытого ключа УЦ
-    priv_key_CA_file = open('CA.priv', "rb")
+    priv_key_CA_file = open('CA/CA.priv', "rb")
     priv_key_CA_data = priv_key_CA_file.read()
     priv_key_CA_array= priv_key_scheme.decode('PrivKey', priv_key_CA_data)
     priv_key_CA = priv_key_CA_array['keyset']['key']['keydata']['d']
     # получение открытого ключа УЦ
-    pub_key_CA_file = open('CA.pub', "rb")
+    pub_key_CA_file = open('CA/CA.pub', "rb")
     pub_key_CA_data = pub_key_CA_file.read()
     pub_key_CA_array= pub_key_scheme.decode('PubKey', pub_key_CA_data)
     pub_key_CA = (pub_key_CA_array['keyset']['key']['keydata']['qx'],pub_key_CA_array['keyset']['key']['keydata']['qy'])
     # pub_key_CA[0] = pub_key_CA_array['keyset']['key']['keydata']['qx']
     # pub_key_CA[1] = pub_key_CA_array['keyset']['key']['keydata']['qy']
 
-    sign = GenSign(pub_key_data,priv_key_CA,pub_key_CA)
+    sign = GenSign(bytearray(pub_key_data),priv_key_CA,pub_key_CA)
 
     cert_data = GenCert(pub_key_data,pub_key_CA_data,sign)
 
-    cert_file = open(client_name+'.crt', "wb")
+    cert_file = open(client_name+'/'+'cl.crt', "wb")
     cert_file.write(cert_data)
     cert_file.close()
 
-    priv_file = open(client_name+'.priv', "wb")
+    priv_file = open(client_name+'/'+'cl.priv', "wb")
     priv_file.write(priv_key_data)
     priv_file.close()
 
-    pub_file = open(client_name+'.pub', "wb")
+    pub_file = open(client_name+'/'+'cl.pub', "wb")
     pub_file.write(pub_key_data)
     pub_file.close()
 
+def AuthCert():
+    GenCACert()
+
+    # pub_key_CA_file = open('CA/CA.pub', "rb")
+    # pub_key_CA_data = pub_key_CA_file.read()
+    # pub_key_CA_array= pub_key_scheme.decode('PubKey', pub_key_CA_data)
+    # pub_key_CA = (pub_key_CA_array['keyset']['key']['keydata']['qx'],pub_key_CA_array['keyset']['key']['keydata']['qy'])
+
+    GenCertAndKeysClient('client1')
+
+    cert_file = open('client1/cl.crt', "rb")
+    cert_data = cert_file.read()
+    cert_array = cert_scheme.decode('Cert', cert_data)
+    pub_key_data = cert_array['pub']
+    # print('pub_key_data',bytearray( pub_key_data))
+    # print(GostHash(bytearray( pub_key_data)).digest())
+    pub_key_CA_data = cert_array['capub']
+    pub_key_CA_array= pub_key_scheme.decode('PubKey', pub_key_CA_data)
+
+
+    pub_key_CA = (pub_key_CA_array['keyset']['key']['keydata']['qx'],pub_key_CA_array['keyset']['key']['keydata']['qy'])
+    sign_data = cert_array['sign']
+
+
+
+    AuthSign(bytearray(pub_key_data),sign_data,pub_key_CA)
 
 curve_param = CURVE_PARAMS["GostR3410_2012_TC26_ParamSetA"]
 
@@ -274,4 +328,4 @@ curve = EllipticCurve(
 
 
 # GenCACert()
-GenCertAndKeysClient('client2')
+AuthCert()

@@ -18,6 +18,8 @@ challenge_scheme = asn1tools.compile_files('schemes/challenge_scheme.asn')
 gost_sign_file = asn1tools.compile_files('schemes/gost_sign.asn')
 pub_key_scheme = asn1tools.compile_files('schemes/public_key_scheme.asn')
 session_key_scheme = asn1tools.compile_files('schemes/session_scheme.asn')
+cert_scheme = asn1tools.compile_files('schemes/cert_scheme.asn')
+priv_key_scheme = asn1tools.compile_files('schemes/private_key_scheme.asn')
 
 #Сессия хранит ключи для каждого сокета
 #Открытый ключ ввиде структуры асн1
@@ -115,7 +117,7 @@ def AuthSign(message, sign_data, Q):
 
     if r > curve.q or s > curve.q:
         return False
-    hash = GostHash(message.encode()).digest()
+    hash = GostHash(message).digest()
     e = int.from_bytes(hash, "big", signed=False) % curve.q
     if e == 0:
         e = 1
@@ -164,56 +166,32 @@ def DecryptGostSym(encText, gost):
 def HelloResponse(message_array, reader, writer):
 
     #получение открытого ключа
-    pubkey_asn1 = message_array['data']
-    # валидировать открытый ключ
-    validate = True
-    #создание сессии
-    sock = writer.transport.get_extra_info('socket')
-    session = Session(sock,pubkey_asn1,None)
-    session_list.append(session)
-    tmp = next((x for x in session_list if x.sock == sock), None)
-    # print(tmp.pubkey)
-    #отправка челленджа
-    ChallengeRequest(reader, writer)
+    cert_data = message_array['data']
+    cert_array = cert_scheme.decode('Cert', cert_data)
+    pub_key_data = cert_array['pub']
+    sign_data = cert_array['sign']
 
+    validate = AuthSign(bytearray(pub_key_data),sign_data,pub_key_CA)
+    # валидировать открытый ключ
+    #validate = True
+    #создание сессии
+    if validate == True:
+        sock = writer.transport.get_extra_info('socket')
+        session = Session(sock,pub_key_data,None)
+        session_list.append(session)
+        tmp = next((x for x in session_list if x.sock == sock), None)
+        # print(tmp.pubkey)
+        #отправка челленджа
+        ChallengeRequest(reader, writer)
+        return
+    cmd_message = GenerateCmd('invalid',bytearray(''.encode()), bytearray(''.encode()))
+    writer.write(cmd_message)
 
 def HelloRequest(reader, writer):
 
-    #отправить открытый ключ
-    #послать свое hello
-    pub_key_data = pub_key_scheme.encode('PubKey', dict(keyset=
-    {
-        'key': dict
-            (
-            algid=b'\x80\x06\x07\x00',
-            test='PubKey',
-            keydata=dict
-            (
-                qx = Q[0],
-                qy = Q[1]
-            ),
-            param=dict
-                (
-                fieldparam=dict
-                (
-                    prime=curve.p
-                ),
-                curveparam=dict
-                    (
-                    a=curve.a,
-                    b=curve.b
-                ),
-                genparam=dict
-                    (
-                    px=curve.P[0],
-                    py=curve.P[1]
-                ),
-                q=curve.q
-            ),
-        )
-    }, last={}))
+    #отправить сертификат
     #подписать
-    cmd_message = GenerateCmd('hello',pub_key_data,bytearray(''.encode()))
+    cmd_message = GenerateCmd('hello',cert_data, bytearray(''.encode()))
     writer.write(cmd_message)
 
 def ChallengeResponse(message_array, reader, writer):
@@ -247,7 +225,8 @@ def VerifyChallenge(message_array, reader, writer):
     Q = (public_key_array['keyset']['key']['keydata']['qx'], public_key_array['keyset']['key']['keydata']['qy'])
 
     sign_data = message_array['data']
-    verified = AuthSign(challenge, sign_data,Q)
+
+    verified = AuthSign(bytearray(challenge, 'utf-8'), sign_data,Q)
     if verified == True:
         # сгенерировать сессионный ключ,получить окрытый ключ из сессии, зашифровать его открытым ключом, взять хэш подписать и отправить
         # генерация сессионного ключа
@@ -390,6 +369,9 @@ async def connect(port, loop):
         ProcessInMes(response,reader, writer)
 
 
+
+
+client_name = 'client1'
 #gen keys
 curve_param = CURVE_PARAMS["GostR3410_2012_TC26_ParamSetA"]
 
@@ -405,15 +387,40 @@ curve = EllipticCurve(
 )
 
 #получить сертификат, ключи
-#
-#
-#
-d = randrange(1, curve.q)
-Q = curve.mult(d, curve.P)
+#получить открытый ключ УЦ
+#добавить отправку файлов
+#добавить проверку сертификатов
+#добавить подпись и проверку сообщений
+# получение закрытого ключа
+priv_key_file = open(client_name+'/'+'cl.priv', "rb")
+priv_key_data = priv_key_file.read()
+priv_key_array = priv_key_scheme.decode('PrivKey', priv_key_data)
+priv_key = priv_key_array['keyset']['key']['keydata']['d']
+# получение открытого ключа
+pub_key_file = open(client_name+'/'+'cl.pub', "rb")
+pub_key_data = pub_key_file.read()
+pub_key_array = pub_key_scheme.decode('PubKey', pub_key_data)
+pub_key = (pub_key_array['keyset']['key']['keydata']['qx'], pub_key_array['keyset']['key']['keydata']['qy'])
+# получение открытого ключа УЦ
+
+cert_file = open(client_name+'/'+'cl.crt', "rb")
+cert_data = cert_file.read()
+
+cert_array = cert_scheme.decode('Cert', cert_data)
+pub_key_CA_data = cert_array['capub']
+pub_key_CA_array = pub_key_scheme.decode('PubKey', pub_key_CA_data)
+pub_key_CA = (pub_key_CA_array['keyset']['key']['keydata']['qx'], pub_key_CA_array['keyset']['key']['keydata']['qy'])
+
+
+
+
+d = priv_key
+Q = pub_key
 
 
 session_list=[]
 challenge = RandomString(10)
+
 loop = asyncio.get_event_loop()
 port = 11111
 loop.create_task(asyncio.start_server(listener, 'localhost', port))
