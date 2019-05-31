@@ -39,7 +39,7 @@ def GenerateCmd(writer, cmd_string, data):
     sock = writer.transport.get_extra_info('socket')
     session = next((x for x in session_list if x.sock == sock), None)
 
-    print(cmd_string,session,session.shaken)
+    # print(cmd_string,session,session.shaken)
     message = cmd_scheme.encode('CmdFile',
                                 {
                                     'command': cmd_string,
@@ -98,8 +98,8 @@ def ChallengeResponse(message_array, reader, writer):
 
     GenerateCmd(writer,'challenge_response',sign)
 
+
 def VerifyChallenge(message_array, reader, writer):
-    # print('verifyChallenge')
     #проверить challenge и отправить разрешение и сессионный ключ
     sock = writer.transport.get_extra_info('socket')
     session = next((x for x in session_list if x.sock == sock), None)
@@ -128,6 +128,7 @@ def EstablishSessionKey(message_array, reader, writer):
     session = next((x for x in session_list if x.sock == sock), None)
     deckey = decode_string(dec, 32)
     session.session_key = deckey.encode('utf-8')
+    print('session_key_arr', session.session_key)
     GenerateCmd(writer,'get_data', bytearray(''.encode()))
 
 def TransmitData(message_array, reader, writer):
@@ -137,8 +138,10 @@ def TransmitData(message_array, reader, writer):
     if(session.session_key == None):
         GenerateCmd(writer,'invalid', bytearray(''.encode()))
         return
-
-    data = RandomString(256)
+    data_file = open(client_name+'/'+'data.txt', "rb")
+    data = data_file.read()
+    data_file.close()
+    # data = RandomString(256)
     ses_key = (session.session_key)
     gost = GOST3412Kuznechik(ses_key)
     enc_data = EncryptGostSym(data,gost)
@@ -148,18 +151,22 @@ def TransmitData(message_array, reader, writer):
 
 def ShowData(message_array, reader, writer):
     sock = writer.transport.get_extra_info('socket')
-    tmp = next((x for x in session_list if x.sock == sock), None)
-    if(tmp.session_key == None):
+    session = next((x for x in session_list if x.sock == sock), None)
+    if(session.session_key == None):
         GenerateCmd(writer,'invalid', bytearray(''.encode()))
         return
     data = message_array['data']
     print('source data      ',data)
 
-    ses_key = tmp.session_key
+    ses_key = session.session_key
     gost = GOST3412Kuznechik(ses_key)
     dec_data = DecryptGostSym(data, gost)
 
     print('decrypted data   ', dec_data)
+
+    data_file = open(client_name+'/'+'data1.txt', "wb")
+    data_file.write(dec_data)
+    data_file.close()
     # message = GenerateCmd('get_data', bytearray(''.encode()))
     # writer.write(message)
     # return
@@ -182,6 +189,8 @@ def GenerateSessionKeys(message_array, reader, writer):
     session.session_key = key
 
     # шифрование сессионного ключа
+    public_key_array = pub_key_scheme.decode('PubKey', session.pubkey)
+    Q = (public_key_array['keyset']['key']['keydata']['qx'], public_key_array['keyset']['key']['keydata']['qy'])
     P, c = EncryptGostOpen(keystr, curve, Q)
 
     session_key_data = session_key_scheme.encode('SessionKey',
@@ -190,7 +199,7 @@ def GenerateSessionKeys(message_array, reader, writer):
                                                      'py': P[1],
                                                      'c': c
                                                  })
-    print('session_key', session.session_key)
+    print('session_key_gen', keystr)
 
     # отправка ключа
     GenerateCmd(writer,'key', session_key_data)
@@ -213,7 +222,7 @@ def ProcessInMes(message,reader, writer):
     if session == None:
         session = Session(sock, None, None)
         session_list.append(session)
-    print(cmd, session, session.shaken)
+    # print(cmd, session, session.shaken)
 
     if session.pubkey != None:
         pub_key_array = pub_key_scheme.decode('PubKey', session.pubkey)
@@ -326,7 +335,5 @@ challenge = RandomString(10)
 loop = asyncio.get_event_loop()
 port = 22222
 loop.create_task(asyncio.start_server(listener, 'localhost', port))
-# loop.create_task(connect(11111, loop))
-#loop.create_task(connect(33333, loop))
 loop.run_forever()
 
